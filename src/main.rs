@@ -1,32 +1,24 @@
-
-use priority_queue::PriorityQueue;
-use std::cmp::{Ordering, Reverse};
+use serde::{Deserialize, Serialize};
 use std::collections::{BinaryHeap, HashMap};
 use std::fs::File;
-use std::future::pending;
-use std::io::{Write, Read};
-use std::io::{Stderr};
-use std::sync::mpsc::channel;
-use serde::{Serialize, Deserialize};
-use bincode;
-use bit_vec::BitVec;
-
+use std::io::{Read, Write};
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 struct HuffmanNode {
     frequency: usize,
     ch: Option<char>,
-    left_node:  Option<Box<HuffmanNode>>,
+    left_node: Option<Box<HuffmanNode>>,
     right_node: Option<Box<HuffmanNode>>,
 }
+
 impl Ord for HuffmanNode {
-    fn cmp(&self, other: &Self) -> Ordering {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         other.frequency.cmp(&self.frequency) // reverse order for min-heap
     }
 }
 
 impl PartialOrd for HuffmanNode {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -42,194 +34,236 @@ impl HuffmanNode {
     }
 }
 
-#[derive(Serialize,Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct BinaryData {
-    //need this as there will be padding if the encode string of 1s and 0s is
-    //not multiple of 8.
     original_length: usize,
     table: HashMap<char, usize>,
     encoded_data: Vec<u8>,
 }
 
 impl BinaryData {
-    fn new(original_length: usize, table: HashMap<char, usize>, encoded_data: Vec<u8> ) -> Self {
-       BinaryData{
-           original_length,
-           table,
-           encoded_data,
-       }
+    fn new(original_length: usize, table: HashMap<char, usize>, encoded_data: Vec<u8>) -> Self {
+        BinaryData {
+            original_length,
+            table,
+            encoded_data,
+        }
     }
 }
 
 fn make_nodes(freqs: &HashMap<char, usize>) -> BinaryHeap<HuffmanNode> {
-
-    let heap =  freqs
+    freqs
         .iter()
         .map(|(c, f)| HuffmanNode::new(*f, Some(*c)))
-        .collect();
-    heap
+        .collect()
 }
+
 fn frequencies(chs: &str) -> HashMap<char, usize> {
     let mut freq: HashMap<char, usize> = HashMap::new();
-    for ch in chs.chars() {
+    chs.chars().for_each(|ch| {
         *freq.entry(ch).or_insert(0) += 1;
-    }
+    });
     freq
 }
+
 fn make_huffman_tree(nodes: &mut BinaryHeap<HuffmanNode>) -> HuffmanNode {
     while nodes.len() > 1 {
-        let left =nodes.pop().unwrap();
-        let right = nodes.pop().unwrap();
+        let left = nodes.pop().expect("Heap should have at least one node");
+        let right = nodes.pop().expect("Heap should have at least one node");
         let mut new_node = HuffmanNode::new(left.frequency + right.frequency, None);
         new_node.left_node = Some(Box::new(left));
         new_node.right_node = Some(Box::new(right));
-        let f = new_node.frequency;
         nodes.push(new_node);
     }
-    nodes.pop().unwrap()
+    nodes.pop().expect("Heap should have at least one node")
 }
-fn make_codes(node: &HuffmanNode, prefix: String,codes: &mut HashMap<char, String>){
-    dbg!(node.ch);
+
+fn make_codes(node: &HuffmanNode, prefix: String, codes: &mut HashMap<char, String>) {
     if let Some(character) = node.ch {
         codes.insert(character, prefix);
         return;
-    } 
-        if let Some(left) = &node.left_node {
-            make_codes(left, format!("{}0", prefix), codes);
-        }
-        if let Some(right) = &node.right_node {
-            make_codes(right, format!("{}1", prefix), codes);
-        }
-    
-}
-fn encode(codes: &HashMap<char, String>, data: &str) -> String{
-    let mut encoded = String::new();
-    for ch in data.chars() {
-        encoded.push_str(&codes[&ch]);
     }
-   encoded
+    if let Some(left) = &node.left_node {
+        make_codes(left, format!("{}0", prefix), codes);
+    }
+    if let Some(right) = &node.right_node {
+        make_codes(right, format!("{}1", prefix), codes);
+    }
 }
-fn decode(bin_string: &str, codes: &HashMap<char, String>, root: &HuffmanNode) -> String{
-    
-    let mut text =  String::new();
+
+fn encode(codes: &HashMap<char, String>, data: &str) -> String {
+    data.chars()
+        .map(|ch| codes[&ch].as_str())
+        .collect::<String>()
+}
+
+fn decode(bin_string: &str, root: &HuffmanNode) -> String {
+    let mut text = String::new();
     let mut current = root;
-    for ch in bin_string.chars(){
-        if ch   == '0'{
-            current = current.left_node.as_ref().unwrap();
-        }
-        else{
-            current = current.right_node.as_ref().unwrap();
-        }
+    for ch in bin_string.chars() {
+        current = if ch == '0' {
+            current.left_node.as_ref().unwrap()
+        } else {
+            current.right_node.as_ref().unwrap()
+        };
         if current.right_node.is_none() && current.left_node.is_none() {
-          
             text.push(current.ch.unwrap());
             current = root;
         }
     }
-   text
+    text
 }
-fn bin_string_to_bytes_vec(bin_string: &str) -> Vec<u8>{
+fn bin_string_to_bytes_vec(bin_string: &str) -> Vec<u8> {
+    let padded_len = (bin_string.len() + 7) / 8 * 8;
+    let padded_str = format!("{:0<width$}", bin_string, width = padded_len);
 
-    //pad with 0s
-    let extra = bin_string.chars().count() % 8;
-    let mut padded_str = bin_string.to_string();
-    for _ in  0..extra{
-      padded_str.push('0');
-    }
-    dbg!(&padded_str);
-    let mut ix: usize = 0;
-    let mut byte :u8 = 0;
-    let mut bytes = vec![];
-    for c in padded_str.chars() {
-        if c == '1' {
-            byte |= 1 << ix;
-        }
-        ix += 1;
-        if ix == 8{
-            bytes.push(byte);
-            ix = 0;
-            byte = 0;
-        }
-    }
-    if ix != 0 {
-        bytes.push(byte);
-    }
-   bytes
+    padded_str
+        .as_bytes()
+        .chunks(8)
+        .map(|chunk| {
+            let byte_str = std::str::from_utf8(chunk).unwrap();
+            u8::from_str_radix(byte_str, 2).unwrap()
+        })
+        .collect()
 }
-fn bytes_vec_to_bin_string(bytes: Vec<u8>) -> String{
+
+fn bytes_vec_to_bin_string(bytes: Vec<u8>) -> String {
     let mut bin_string = String::new();
-   
-    for b in bytes { 
-        let mut ix: usize = 0;
-        while ix < 8 {
-           let bit = (b >> ix) & 1;
-           dbg!(bit);
-           if bit == 0{
-               bin_string.push('0')
-           }else {
-               bin_string.push('1')
-           }
-           ix += 1;
-       }
+    for b in bytes {
+        for ix in 0..8 {
+            let bit = (b >> ix) & 1;
+            bin_string.push(if bit == 0 { '0' } else { '1' });
+        }
     }
-    bin_string
+    bin_string.chars().rev().collect()
 }
-fn write_to_file(encoded: String, freqs: HashMap<char, usize>, fname: &str){
 
-
-    // Write the binary data to a file
-
+fn write_to_file(encoded: String, freqs: HashMap<char, usize>, fname: &str) -> std::io::Result<()> {
     let all_bytes = bin_string_to_bytes_vec(&encoded);
-
     let bin_data = BinaryData::new(encoded.len(), freqs, all_bytes);
     let encoded: Vec<u8> = bincode::serialize(&bin_data).unwrap();
-    let mut file = File::create("data.bin").unwrap();
-    file.write_all(&encoded);
-    //let encoded: Vec<u8> = bincode::encode_to_vec(&bin_data, config).unwrap();
-    //dbg!(encoded);
+    let mut file = File::create(fname)?;
+    file.write_all(&encoded)?;
+    Ok(())
+}
 
+fn read_from_file(fname: &str) -> std::io::Result<BinaryData> {
+    let file = File::open(fname)?;
+    let bd: BinaryData = bincode::deserialize_from(file).unwrap();
+    Ok(bd)
 }
-fn read_from_file(fname: &str) -> BinaryData{
-    
-   let mut bd:BinaryData =  bincode::deserialize_from(File::open("data.bin").unwrap()).unwrap();
-    dbg!(&bd);
-   bd
-}
-fn read_file() -> String{
-    let mut file = File::open("/Users/mikehoughton/TinderAutomation/StatesAndCities/Georgia/acworth.txt").unwrap();
+
+fn _read_file(path: &str) -> std::io::Result<String> {
+    let mut file = File::open(path)?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents);
-    contents
-    
+    file.read_to_string(&mut contents)?;
+    Ok(contents)
 }
-fn main() {
-   
-    read_from_file("");
-    let data = "hello";//read_file();
+
+fn main() -> std::io::Result<()> {
+    let data = "hello"; // read_file("path/to/file.txt")?;
     let freqs = frequencies(&data);
-    // dbg!(&freqs);
-
     let mut nodes = make_nodes(&freqs);
-
-    // while let Some(h) = &nodes.pop() {
-    //     println!("-> {:?} ", h);
-    // }
-    // dbg!(&nodes);
     let tree = make_huffman_tree(&mut nodes);
-  
-  //  dbg!(&tree);
-    
     let mut codes = HashMap::new();
-    make_codes(&tree,String::new(),&mut codes);
-    // dbg!(&codes);
-    
+    make_codes(&tree, String::new(), &mut codes);
     let encoded = encode(&codes, &data);
-    dbg!(&encoded);
-   
-    let decoded = decode(&encoded, &codes, &tree);
-    // dbg!(&decoded);
+    let _decoded = decode(&encoded, &tree);
     let all_bytes = bin_string_to_bytes_vec(&encoded);
-    let back = bytes_vec_to_bin_string(all_bytes);
-    dbg!(back);
-    write_to_file(encoded, freqs, "test.bin");
+    let _back = bytes_vec_to_bin_string(all_bytes);
+    write_to_file(encoded, freqs, "test.bin")?;
+    read_from_file("test.bin")?;
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_frequencies() {
+        let data = "hello";
+        let freqs = frequencies(data);
+        let mut expected = HashMap::new();
+        expected.insert('h', 1);
+        expected.insert('e', 1);
+        expected.insert('l', 2);
+        expected.insert('o', 1);
+        assert_eq!(freqs, expected);
+    }
+
+    #[test]
+    fn test_make_nodes() {
+        let mut freqs = HashMap::new();
+        freqs.insert('a', 5);
+        freqs.insert('b', 9);
+        freqs.insert('c', 12);
+        let nodes = make_nodes(&freqs);
+        assert_eq!(nodes.len(), 3);
+    }
+
+    #[test]
+    fn test_make_huffman_tree() {
+        let mut freqs = HashMap::new();
+        freqs.insert('a', 5);
+        freqs.insert('b', 9);
+        freqs.insert('c', 12);
+        let mut nodes = make_nodes(&freqs);
+        let tree = make_huffman_tree(&mut nodes);
+        assert_eq!(tree.frequency, 26);
+    }
+
+    #[test]
+    fn test_make_codes() {
+        let mut freqs = HashMap::new();
+        freqs.insert('a', 5);
+        freqs.insert('b', 9);
+        freqs.insert('c', 12);
+        let mut nodes = make_nodes(&freqs);
+        let tree = make_huffman_tree(&mut nodes);
+        let mut codes = HashMap::new();
+        make_codes(&tree, String::new(), &mut codes);
+        assert!(codes.contains_key(&'a'));
+        assert!(codes.contains_key(&'b'));
+        assert!(codes.contains_key(&'c'));
+    }
+
+    #[test]
+    fn test_encode() {
+        let mut codes = HashMap::new();
+        codes.insert('a', "0".to_string());
+        codes.insert('b', "10".to_string());
+        codes.insert('c', "11".to_string());
+        let data = "abc";
+        let encoded = encode(&codes, data);
+        assert_eq!(encoded, "01011");
+    }
+
+    #[test]
+    fn test_decode() {
+        let mut freqs = HashMap::new();
+        freqs.insert('a', 5);
+        freqs.insert('b', 9);
+        freqs.insert('c', 12);
+        let mut nodes = make_nodes(&freqs);
+        let tree = make_huffman_tree(&mut nodes);
+        let mut codes = HashMap::new();
+        make_codes(&tree, String::new(), &mut codes);
+        let encoded = encode(&codes, "abc");
+        let decoded = decode(&encoded, &tree);
+        assert_eq!(decoded, "abc");
+    }
+
+    #[test]
+    fn test_bin_string_to_bytes_vec() {
+        let bin_string = "01000001";
+        let bytes = bin_string_to_bytes_vec(bin_string);
+        assert_eq!(bytes, vec![65]);
+    }
+
+    #[test]
+    fn test_bytes_vec_to_bin_string() {
+        let bytes = vec![65];
+        let bin_string = bytes_vec_to_bin_string(bytes);
+        assert_eq!(bin_string, "01000001");
+    }
 }
