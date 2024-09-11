@@ -3,7 +3,7 @@ use std::collections::{BinaryHeap, HashMap};
 use std::fs::File;
 use std::io::{Read, Write};
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct HuffmanNode {
     frequency: usize,
     ch: Option<char>,
@@ -52,10 +52,13 @@ impl BinaryData {
 }
 
 fn make_nodes(freqs: &HashMap<char, usize>) -> BinaryHeap<HuffmanNode> {
-    freqs
+    let n: BinaryHeap<HuffmanNode> = freqs
         .iter()
         .map(|(c, f)| HuffmanNode::new(*f, Some(*c)))
-        .collect()
+        .collect();
+
+    //dbg!(&n);
+    n
 }
 
 fn frequencies(chs: &str) -> HashMap<char, usize> {
@@ -75,12 +78,13 @@ fn make_huffman_tree(nodes: &mut BinaryHeap<HuffmanNode>) -> HuffmanNode {
         new_node.right_node = Some(Box::new(right));
         nodes.push(new_node);
     }
-    nodes.pop().expect("Heap should have at least one node")
+    nodes.pop().unwrap() //.expect("Heap should have at least one node")
 }
 
 fn make_codes(node: &HuffmanNode, prefix: String, codes: &mut HashMap<char, String>) {
     if let Some(character) = node.ch {
         codes.insert(character, prefix);
+        dbg!(codes);
         return;
     }
     if let Some(left) = &node.left_node {
@@ -159,11 +163,35 @@ fn _read_file(path: &str) -> std::io::Result<String> {
     file.read_to_string(&mut contents)?;
     Ok(contents)
 }
+fn encrypt(data: &str) -> BinaryData {
+    let freqs = frequencies(data);
+    let mut nodes = make_nodes(&freqs);
+    let tree = make_huffman_tree(&mut nodes);
+    let mut codes = HashMap::new();
+    make_codes(&tree, String::new(), &mut codes);
+    let bin_string = encode(&codes, data);
+    let v = bin_string_to_bytes_vec(&bin_string);
+    let b = BinaryData::new(data.len(), freqs, v);
+    b
+}
+fn decrypt(data: &BinaryData) -> String {
+    let mut nodes = make_nodes(&data.table);
+    let tree = make_huffman_tree(&mut nodes);
+    let bin_string = bytes_vec_to_bin_string(data.encoded_data.clone());
+    decode(&bin_string, &tree)
+}
 
 fn main() -> std::io::Result<()> {
     let data = "hello"; // read_file("path/to/file.txt")?;
     let freqs = frequencies(&data);
     let mut nodes = make_nodes(&freqs);
+    let mut ok = true;
+    // while (ok) {
+    //     dbg!(&nodes.pop());
+    //     if (nodes.is_empty()) {
+    //         ok = false;
+    //     }
+    // }
     let tree = make_huffman_tree(&mut nodes);
     let mut codes = HashMap::new();
     make_codes(&tree, String::new(), &mut codes);
@@ -178,6 +206,13 @@ fn main() -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn encrypt_decrypt() {
+        let data = "hello";
+        let bd = encrypt(data);
+        let new_data = decrypt(&bd);
+        assert_eq!(data, new_data);
+    }
 
     #[test]
     fn test_frequencies() {
@@ -226,7 +261,20 @@ mod tests {
         assert!(codes.contains_key(&'b'));
         assert!(codes.contains_key(&'c'));
     }
+    #[test]
+    fn test_encode_more() {
+        let data = "Hello, World!";
+        let freqs = frequencies(data);
+        let mut huff = make_nodes(&freqs);
+        let huff_tree = make_huffman_tree(&mut huff);
+        let mut codes = HashMap::new();
+        make_codes(&huff_tree, String::new(), &mut codes);
+        let encoded = encode(&codes, data);
 
+        let decoded = decode(&encoded, &huff_tree);
+
+        assert_eq!(decoded, data);
+    }
     #[test]
     fn test_encode() {
         let mut codes = HashMap::new();
