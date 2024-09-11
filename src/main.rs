@@ -120,20 +120,22 @@ fn decode(bin_string: &str, root: &HuffmanNode) -> String {
 fn bin_string_to_bytes_vec(bin_string: &str) -> Vec<u8> {
     let padded_len = (bin_string.len() + 7) / 8 * 8;
     let padded_str = format!("{:0<width$}", bin_string, width = padded_len);
-
-    padded_str
+    dbg!(&padded_str);
+    let v = padded_str
         .as_bytes()
         .chunks(8)
         .map(|chunk| {
             let byte_str = std::str::from_utf8(chunk).unwrap();
             u8::from_str_radix(byte_str, 2).unwrap()
         })
-        .collect()
+        .collect();
+    dbg!(&v);
+    v
 }
 
 fn bytes_vec_to_bin_string(bytes: Vec<u8>) -> String {
     let mut bin_string = String::new();
-    for b in bytes {
+    for b in bytes.iter().rev() {
         for ix in 0..8 {
             let bit = (b >> ix) & 1;
             bin_string.push(if bit == 0 { '0' } else { '1' });
@@ -170,6 +172,7 @@ fn encrypt(data: &str) -> BinaryData {
     let mut codes = HashMap::new();
     make_codes(&tree, String::new(), &mut codes);
     let bin_string = encode(&codes, data);
+    dbg!(&bin_string);
     let v = bin_string_to_bytes_vec(&bin_string);
     let b = BinaryData::new(data.len(), freqs, v);
     b
@@ -178,14 +181,17 @@ fn decrypt(data: &BinaryData) -> String {
     let mut nodes = make_nodes(&data.table);
     let tree = make_huffman_tree(&mut nodes);
     let bin_string = bytes_vec_to_bin_string(data.encoded_data.clone());
-    decode(&bin_string, &tree)
+    dbg!(&bin_string);
+    let mut res = decode(&bin_string, &tree);
+    res.truncate(data.original_length);
+    res
 }
 
 fn main() -> std::io::Result<()> {
     let data = "hello"; // read_file("path/to/file.txt")?;
     let freqs = frequencies(&data);
     let mut nodes = make_nodes(&freqs);
-    let mut ok = true;
+    //let mut ok = true;
     // while (ok) {
     //     dbg!(&nodes.pop());
     //     if (nodes.is_empty()) {
@@ -193,6 +199,7 @@ fn main() -> std::io::Result<()> {
     //     }
     // }
     let tree = make_huffman_tree(&mut nodes);
+    dbg!(&tree);
     let mut codes = HashMap::new();
     make_codes(&tree, String::new(), &mut codes);
     let encoded = encode(&codes, &data);
@@ -207,13 +214,27 @@ fn main() -> std::io::Result<()> {
 mod tests {
     use super::*;
     #[test]
-    fn encrypt_decrypt() {
+    fn encrypt_decrypt1() {
         let data = "hello";
         let bd = encrypt(data);
         let new_data = decrypt(&bd);
         assert_eq!(data, new_data);
     }
 
+    #[test]
+    fn encrypt_decrypt2() {
+        let data = "hellohellohello how are you doing today?, I'm well thank you";
+        let bd = encrypt(data);
+        let new_data = decrypt(&bd);
+        assert_eq!(data, new_data);
+    }
+    #[test]
+    fn encrypt_decrypt3() {
+        let data = "hellohellohello how are you doing today?, I'm well thank you, hellohellohello how are you doing today?, I'm well thank you, sdhsdsdsdshdsdsjm763£££$$%^BHjfshdfshfsfskjsjk";
+        let bd = encrypt(data);
+        let new_data = decrypt(&bd);
+        assert_eq!(data, new_data);
+    }
     #[test]
     fn test_frequencies() {
         let data = "hello";
